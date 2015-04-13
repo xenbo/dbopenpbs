@@ -1,0 +1,223 @@
+#include <sys/un.h>
+#include <stdio.h>
+#include <signal.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/socket.h>
+#include <fcntl.h>
+#include "get_load_from_node.h"
+
+#define UNIX_SERV_PATH "/tmp/sinfor"
+#define N_SERVER  20
+
+struct jobnode
+{
+	int id;
+	char path[150];
+	struct jobnode *next;
+};
+
+struct servernode_con
+{
+	int id;
+	int n_addjob;
+	int staus;
+	char ip[20];
+	float load;
+};
+
+struct servernode_con l_ser_node[N_SERVER];
+
+int n_job=0;
+struct jobnode *JF=NULL;
+struct jobnode *JR=NULL;
+
+void *revjob_insertlist()
+{
+	int unixsockfd;
+	unixsockfd = socket(AF_LOCAL, SOCK_STREAM, 0);
+	if(unixsockfd == -1)
+	{
+		perror("socket func fail ");
+		return ;
+	}
+	struct sockaddr_un ser_addr, cli_addr;
+	ser_addr.sun_family = AF_LOCAL;
+	strcpy(ser_addr.sun_path, UNIX_SERV_PATH);
+	unlink(UNIX_SERV_PATH);
+	bind(unixsockfd, (struct sockaddr*)&ser_addr, sizeof(ser_addr));
+	listen(unixsockfd, 20);
+
+	//int c=0;
+	//int c2=0;
+	//char cm[10000][100];
+	
+	char rc[200];
+
+	while(1)
+	{
+				
+		sleep(1);		
+		printf("job ....\n ");
+
+		int len = sizeof(cli_addr);
+		int connfd = accept(unixsockfd, (struct sockaddr*)&cli_addr, &len);
+		
+		
+			
+		 //fcntl(connfd,  F_SETFL, O_NONBLOCK );
+		if(connfd <0)
+		{
+			printf("error \n");
+			break;
+		};
+
+		int n=0;
+    	while(1)
+    	{
+			//bzero(rbuf,MAX_RECV);
+    		n = read(connfd, rc, 150);
+    		if(n>0)
+    		{
+   				//cm[c][n] = '\0';
+				//printf("%d   ",c2);
+				//printf(" %d %s \n",c,cm[c]);
+				//c++;
+
+				struct jobnode *tmp=(struct jobnode*)malloc(sizeof(struct jobnode));
+				tmp->next=NULL;
+				strcpy(tmp->path,rc);
+				if(JF==JR)
+				{
+					JF=tmp;
+					tmp->next=JR;
+					JR->next=tmp;
+					n_job++;
+				}else
+				{
+					JR->next->next=tmp;
+					tmp->next=JR;
+					JR->next=tmp;
+					n_job++;
+				}
+				printf(" %s %d\n",tmp->path,n_job);//新增加的任务。。。
+    		}
+    		else if(n <=0)
+    		{
+				printf("connect agin... \n");
+    			break;   			
+    		}  	
+			//if(c==10000)
+			//{	c=0;c2++;}
+    	}
+
+		close(connfd);
+	}
+	close(unixsockfd);
+	/*
+	for(c=0;c<10000;c++)
+	{
+		printf("%s \n",cm[c]);
+	}	
+*/
+}
+
+
+
+void heap_sort(int st,int maxed)
+{
+    int i=st;
+    int j=2*i;
+	float tm=l_ser_node[i].load;
+    while(j<maxed)
+    {
+        if(j<maxed && l_ser_node[j].load>l_ser_node[j+1].load)
+            j++;
+
+        if(l_ser_node[j].load<tm)
+        {
+			l_ser_node[i].load=l_ser_node[j].load;			
+			i=j;  
+		    j=2*i;
+        }
+		else break;
+    }
+	l_ser_node[i].load=tm;
+}
+
+void sort_load()
+{
+	int n=N_SERVER;
+	int i,j,k;	
+	for(i=n/2;i>=0;i--)
+	{
+		heap_sort(i,n);
+	}
+}
+
+int get_minloda_node()
+{
+	heap_sort(0,N_SERVER);
+	return l_ser_node[0].id;
+}
+
+void *kill_jobnode()
+{
+	
+	while(1)
+	{		
+			struct jobnode *p=NULL;
+			struct jobnode *q=JF;
+			while(q)
+			{	
+				if(q==JR)
+				{
+						sleep(1);
+						break;
+				}
+ 				p=q;
+				q=q->next;
+				JF=q;
+				printf(" free   path %s  \n",p->path);//即发射到节点的任务，将计算的任务
+				//
+				
+				free(p);
+				sleep(1);
+			}
+			sleep(2);
+	}
+
+}
+
+
+int main(int argc, char** argv)
+{
+
+	memset(l_ser_node,0,sizeof(l_ser_node));
+	JR=(struct jobnode *)malloc(sizeof(struct jobnode));
+	JF=JR;
+	JR->next=JF;
+	
+	pthread_t tid1,tid2,tid3;	
+	
+	/// 1
+	pthread_create(&tid1,NULL,revjob_insertlist,NULL);
+	
+	/// 2
+	pthread_create(&tid2,NULL,kill_jobnode,NULL);
+	
+	/// 3
+	pthread_create(&tid3,NULL,getload_from_node,NULL);
+
+
+	sleep(1);
+	printf("\n===== list OK====== \n");
+	
+	while(1)
+		pause();
+	return 0;
+}
+
+
